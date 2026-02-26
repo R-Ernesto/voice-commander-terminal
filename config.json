@@ -1,0 +1,27 @@
+{
+  "shortcuts": [
+    {
+      "hotkey": "Ctrl+Alt+1",
+      "label": "Fix bug",
+      "action": "type",
+      "text": "Revisa el error y propón una solución\n"
+    },
+    {
+      "hotkey": "Ctrl+Alt+2",
+      "label": "Explain code",
+      "action": "type",
+      "text": "Explica este código paso a paso\n"
+    },
+    {
+      "hotkey": "Ctrl+Alt+3",
+      "label": "Write tests",
+      "action": "type",
+      "text": "Escribe tests para este módulo\n"
+    },
+    {
+      "hotkey": "Ctrl+Alt+Q",
+      "label": "Quit service",
+      "action": "quit"
+    }
+  ]
+}
