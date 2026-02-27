@@ -129,9 +129,9 @@ Editar `config.json` → sección `voice`:
 }
 ```
 
-- `whisper_initial_prompt` — palabras que Whisper debe reconocer (nombres propios, técnicos)
-- `whisper_model` — `tiny`, `base`, `small`, `medium`, `large-v3` (más grande = más preciso, más lento)
-- Requiere venv de `voice-commander` con faster-whisper + CUDA instalado
+- `whisper_initial_prompt` — palabras que Whisper debe reconocer (nombres propios, técnicos). **Se recarga en caliente**: edita el prompt y la próxima grabación ya lo usa, sin relanzar el sidecar.
+- `whisper_model` — `tiny`, `base`, `small`, `medium`, `large-v3` (más grande = más preciso, más lento). Cambiar modelo **sí requiere relanzar**.
+- Requiere venv de `voice-commander` (`C:\dev\my-adventures\voice-commander\.venv`) con faster-whisper + CUDA. No tiene venv propio, reutiliza el existente.
 
 ## Diagnóstico
 
@@ -173,3 +173,8 @@ cat .\service.log
 **Problema**: Si ejecutas el script, lo modificas, y lo ejecutas de nuevo en la misma sesión de PowerShell, `Add-Type` falla porque el tipo C# ya está cargado en el AppDomain y no se puede redefinir.
 
 **Solución**: Guard con `if (-not ([System.Management.Automation.PSTypeName]'TypeName').Type)` antes de cada `Add-Type`. Igualmente, abrir una terminal nueva si se cambia la definición del tipo.
+
+### 6. Ctrl+Alt+V/T produce caracteres ^V / ^T en la terminal
+**Problema**: La lib `keyboard` de Python escuchaba los hotkeys con `on_press_key(suppress=False)`, dejando que las teclas llegaran a la terminal. En Windows, Ctrl+Alt equivale a AltGr, produciendo caracteres especiales (`^V`, `^T`) antes del texto transcrito.
+
+**Solución**: Cambiar a `keyboard.add_hotkey(combo, callback, suppress=True)` que intercepta el combo completo y lo consume antes de que llegue a la terminal. El key-up no necesita suppress porque no genera caracteres.
