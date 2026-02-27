@@ -1,2 +1,6 @@
 service.log
 .claude/
+signal.json
+signal.json.tmp
+__pycache__/
+*.pyc

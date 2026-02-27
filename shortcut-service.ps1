@@ -24,6 +24,7 @@ function Write-Log {
 # Load library modules
 . (Join-Path $PSScriptRoot "lib\hotkey-listener.ps1")
 . (Join-Path $PSScriptRoot "lib\text-injector.ps1")
+. (Join-Path $PSScriptRoot "lib\voice-poll.ps1")
 
 # --- Load config ---
 if (-not (Test-Path $ConfigPath)) {
@@ -64,6 +65,11 @@ if ($registered.Count -eq 0) {
 }
 
 Write-Log "$($registered.Count) hotkeys registered." "Green"
+
+# Voice signal polling setup
+$signalPath = Join-Path $PSScriptRoot "signal.json"
+Write-Log "Voice signal path: $signalPath" "DarkGray"
+
 Write-Log "Service running. Press $($shortcuts[-1].hotkey) to quit." "Yellow"
 Write-Log "--- Waiting for hotkeys ---"
 
@@ -96,6 +102,17 @@ try {
                     Write-Log "UNKNOWN action: $($sc.action)" "Red"
                 }
             }
+        }
+
+        # --- Poll for voice signal ---
+        $voiceSignal = Poll-VoiceSignal -SignalPath $signalPath
+        if ($voiceSignal) {
+            $vText = $voiceSignal.Text
+            if ($voiceSignal.AutoSubmit) { $vText += "`n" }
+            Write-Log "VOICE: `"$($voiceSignal.Text)`" ($($voiceSignal.AudioSec)s, $($voiceSignal.LatencyMs)ms STT, lang=$($voiceSignal.Language))" "Magenta"
+            Start-Sleep -Milliseconds 200
+            Send-TextToWindow -Text $vText -WindowHandle $voiceSignal.Hwnd
+            Write-Log "  Voice text injected." "Green"
         }
 
         Start-Sleep -Milliseconds 50

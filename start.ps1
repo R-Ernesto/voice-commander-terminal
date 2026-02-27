@@ -12,6 +12,15 @@ $ErrorActionPreference = "Stop"
 $scriptDir = $PSScriptRoot
 $servicePath = Join-Path $scriptDir "shortcut-service.ps1"
 $logPath = Join-Path $scriptDir "service.log"
+$sidecarScript = Join-Path $scriptDir "sidecar\voice_sidecar.py"
+
+# Find Python: prefer the voice-commander venv (has faster-whisper + CUDA)
+$venvPython = "C:\dev\my-adventures\voice-commander\.venv\Scripts\python.exe"
+if (Test-Path $venvPython) {
+    $pythonExe = $venvPython
+} else {
+    $pythonExe = "python"
+}
 
 if (-not (Test-Path $servicePath)) {
     Write-Error "shortcut-service.ps1 not found at: $servicePath"
@@ -31,9 +40,28 @@ if ($ServiceOnly) {
     Write-Host "Running in service-only mode (direct, interactive)." -ForegroundColor Yellow
     Write-Host ""
 
-    $args = @()
-    if ($ConfigPath) { $args += "-ConfigPath", $ConfigPath }
-    & $servicePath @args
+    # Launch voice sidecar
+    $sidecarProc = $null
+    if (Test-Path $sidecarScript) {
+        Write-Host "Starting voice sidecar ($pythonExe)..." -ForegroundColor DarkGray
+        $sidecarProc = Start-Process $pythonExe -ArgumentList "`"$sidecarScript`"" `
+            -WindowStyle Hidden -PassThru
+        Write-Host "Voice sidecar started (PID: $($sidecarProc.Id))" -ForegroundColor Green
+    } else {
+        Write-Host "Voice sidecar not found, skipping voice input." -ForegroundColor Yellow
+    }
+
+    try {
+        $serviceArgs = @()
+        if ($ConfigPath) { $serviceArgs += "-ConfigPath", $ConfigPath }
+        & $servicePath @serviceArgs
+    }
+    finally {
+        if ($sidecarProc -and -not $sidecarProc.HasExited) {
+            Stop-Process -Id $sidecarProc.Id -Force -ErrorAction SilentlyContinue
+            Write-Host "Voice sidecar stopped." -ForegroundColor Green
+        }
+    }
 }
 else {
     # Launch the service as a separate visible (minimized) PowerShell window.
@@ -46,14 +74,27 @@ else {
     }
 
     $serviceProc = Start-Process powershell -ArgumentList $psArgs `
-        -WindowStyle Minimized -PassThru
+        -WindowStyle Hidden -PassThru
 
     Write-Host "Service started (PID: $($serviceProc.Id), minimized window)" -ForegroundColor Green
+
+    # Launch voice sidecar
+    $sidecarProc = $null
+    if (Test-Path $sidecarScript) {
+        Write-Host "Starting voice sidecar ($pythonExe)..." -ForegroundColor DarkGray
+        $sidecarProc = Start-Process $pythonExe -ArgumentList "`"$sidecarScript`"" `
+            -WindowStyle Hidden -PassThru
+        Write-Host "Voice sidecar started (PID: $($sidecarProc.Id))" -ForegroundColor Green
+    } else {
+        Write-Host "Voice sidecar not found, skipping voice input." -ForegroundColor Yellow
+    }
+
     Start-Sleep -Seconds 1
 
     Write-Host ""
     Write-Host "Launching Claude Code..." -ForegroundColor Cyan
-    Write-Host "Shortcuts are active. Check service window or $logPath for logs." -ForegroundColor DarkGray
+    Write-Host "Shortcuts are active. Hold Ctrl+Alt+V to speak." -ForegroundColor DarkGray
+    Write-Host "Check service window or $logPath for logs." -ForegroundColor DarkGray
     Write-Host ""
 
     try {
@@ -65,6 +106,11 @@ else {
     finally {
         Write-Host ""
         Write-Host "Claude Code exited. Cleaning up..." -ForegroundColor DarkGray
+
+        if ($sidecarProc -and -not $sidecarProc.HasExited) {
+            Stop-Process -Id $sidecarProc.Id -Force -ErrorAction SilentlyContinue
+            Write-Host "Voice sidecar stopped." -ForegroundColor Green
+        }
 
         if (-not $serviceProc.HasExited) {
             Stop-Process -Id $serviceProc.Id -Force -ErrorAction SilentlyContinue

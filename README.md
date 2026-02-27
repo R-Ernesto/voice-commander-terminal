@@ -1,84 +1,137 @@
 # Voice Commander Terminal
 
-Servicio PowerShell que escucha hotkeys globales e inyecta texto en la ventana activa de Windows Terminal. Diseñado para enviar comandos predefinidos a Claude Code sin escribir.
+Servicio PowerShell + sidecar Python que inyecta texto en la ventana activa de Windows Terminal via hotkeys globales y entrada por voz. Diseñado para interactuar con Claude Code sin escribir.
 
 ## Uso rápido
 
 ```powershell
-# Solo el servicio de shortcuts (para testing)
+# Solo el servicio (shortcuts + voz, sin Claude Code)
 .\start.ps1 -ServiceOnly
 
 # Servicio + Claude Code (uso real)
 .\start.ps1
+
+# Desde cualquier terminal (shortcut de PowerShell profile)
+voice-sidecar
 ```
 
-## Shortcuts por defecto
+## Hotkeys
 
-| Hotkey | Acción |
-|--------|--------|
-| Ctrl+Alt+1 | "Revisa el error y propón una solución" |
-| Ctrl+Alt+2 | "Explica este código paso a paso" |
-| Ctrl+Alt+3 | "Escribe tests para este módulo" |
+### Texto predefinido — frases frecuentes al instante
+
+Atajos para prompts que usas repetidamente con Claude Code. Un solo atajo manda la frase completa sin tener que dictarla ni escribirla cada vez.
+
+| Hotkey | Texto |
+|--------|-------|
+| Ctrl+Alt+1 | "Revisa el error y propón una solución" + Enter |
+| Ctrl+Alt+2 | "Explica este código paso a paso" + Enter |
+| Ctrl+Alt+3 | "Escribe tests para este módulo" + Enter |
 | Ctrl+Alt+Q | Detener el servicio |
 
-Editables en `config.json`.
+Editables en `config.json`. Puedes agregar más frases que uses seguido.
+
+### Voz — push-to-talk con Whisper STT
+
+Mantén presionado el hotkey mientras hablas, suelta para transcribir e inyectar.
+
+| Hotkey | Modo | Descripción |
+|--------|------|-------------|
+| Ctrl+Alt+V | **Submit** | Graba → transcribe → pega texto → **Enter** (se envía a Claude automáticamente) |
+| Ctrl+Alt+T | **Texto** | Graba → transcribe → pega texto → **sin Enter** (puedes revisar/editar antes de enviar) |
+
+**Cuándo usar cada uno:**
+- **Ctrl+Alt+V** — cuando sabes lo que quieres decir y quieres que Claude lo procese directo. Ej: "explica qué hace esta función", "arregla el error de conexión".
+- **Ctrl+Alt+T** — cuando quieres dictar algo largo o complejo y revisar antes de enviarlo. Ej: dictar una descripción de un bug, redactar un mensaje, o cuando no estás seguro de que Whisper transcribirá bien.
 
 ## Arquitectura
 
 ```
-Windows Terminal (Terminal B)         PowerShell (Terminal A)
-┌──────────────────────────┐         ┌──────────────────────────┐
-│  Claude Code / shell     │◄────────│  shortcut-service.ps1    │
-│  recibe texto pegado     │  paste  │  escucha hotkeys globales│
-└──────────────────────────┘         └──────────────────────────┘
-                                       │ usa:
-                                       ├─ lib/hotkey-listener.ps1
-                                       └─ lib/text-injector.ps1
+ Hotkeys de texto (Ctrl+Alt+1/2/3)     Hotkeys de voz (Ctrl+Alt+V / T)
+        │                                       │
+        ▼                                       ▼
+ [PS shortcut-service]                   [Python sidecar]
+  RegisterHotKey                          keyboard lib (push-to-talk)
+  PeekMessage loop ◄──── poll 50ms ────  signal.json (atómico)
+        │                                       │
+        ▼                                       ▼
+ [PS text-injector]                      [faster-whisper STT]
+  SetForegroundWindow                     CUDA / float16
+  Clipboard + SendKeys paste              Modelo: medium
+        │
+        ▼
+ [Ventana target]
+  Claude Code / shell / cualquier app
 ```
 
-**Flujo**:
-1. `hotkey-listener.ps1` registra hotkeys globales via Win32 `RegisterHotKey`
-2. Al detectar hotkey, captura el handle de la ventana activa (`GetForegroundWindow`)
-3. `text-injector.ps1` pone el texto en el clipboard (`Set-Clipboard`)
-4. Fuerza foco a la ventana target (`SetForegroundWindow`)
-5. Pega via `WScript.Shell SendKeys("^v")`
+**Flujo de texto predefinido**:
+1. PS `RegisterHotKey` detecta el atajo
+2. Captura `GetForegroundWindow()` inmediatamente
+3. `Set-Clipboard` + `SendKeys("^v")` pega el texto
+
+**Flujo de voz**:
+1. Python detecta key-down → captura hwnd → beep 800Hz → graba audio
+2. Key-up → beep 600Hz → Whisper transcribe → escribe `signal.json`
+3. PS poll detecta el archivo → `SetForegroundWindow(hwnd)` → clipboard paste
 
 ## Estructura
 
 ```
 voice-commander-terminal/
-├── start.ps1              # Entry point
-├── shortcut-service.ps1   # Servicio principal (config + loop + dispatch)
-├── config.json            # Shortcuts configurables (hotkey → texto/acción)
+├── start.ps1               # Entry point (lanza service + sidecar + claude)
+├── shortcut-service.ps1    # Servicio PS (hotkeys + poll de signal.json)
+├── config.json             # Shortcuts + config de voz (modelo Whisper, hotkeys)
 ├── lib/
-│   ├── hotkey-listener.ps1  # Win32 RegisterHotKey + PeekMessage loop
-│   └── text-injector.ps1    # Clipboard + SetForegroundWindow + SendKeys paste
-├── test-inject.ps1        # Test de diagnóstico (abre Notepad, prueba inyección)
-├── ALTERNATIVES.md        # Opciones para escalar (Go, Rust, C#, Electron)
-└── service.log            # Log del servicio (gitignored)
+│   ├── hotkey-listener.ps1 # Win32 RegisterHotKey + PeekMessage loop
+│   ├── text-injector.ps1   # Clipboard + SetForegroundWindow + SendKeys paste
+│   └── voice-poll.ps1      # Polling de signal.json
+├── sidecar/
+│   ├── voice_sidecar.py    # Entry point Python (config + warmup + loop)
+│   ├── hotkey_handler.py   # Push-to-talk (key-down/up + captura hwnd)
+│   ├── audio_recorder.py   # Captura audio (sounddevice InputStream)
+│   ├── stt.py              # Wrapper faster-whisper (singleton)
+│   ├── signal_writer.py    # Escritura atómica signal.json
+│   └── requirements.txt    # Deps Python (referencia, usa venv de voice-commander)
+├── test-inject.ps1         # Test de diagnóstico (abre Notepad, prueba inyección)
+├── ALTERNATIVES.md         # Opciones para escalar (Go, Rust, C#, Electron)
+└── service.log             # Log del servicio (gitignored)
 ```
 
-## Personalizar shortcuts
+## Personalizar
 
-Editar `config.json`:
+### Agregar shortcuts de texto
+
+Editar `config.json` → sección `shortcuts`:
 
 ```json
 {
-  "shortcuts": [
-    {
-      "hotkey": "Ctrl+Alt+5",
-      "label": "Mi comando",
-      "action": "type",
-      "text": "texto que quiero inyectar\n"
-    }
-  ]
+  "hotkey": "Ctrl+Alt+5",
+  "label": "Mi comando",
+  "action": "type",
+  "text": "texto que quiero inyectar\n"
 }
 ```
 
-- `action: "type"` → pega texto en la ventana activa
-- `action: "quit"` → detiene el servicio
-- `\n` al final del texto → envía Enter automáticamente (ejecuta el comando)
+- `\n` al final → envía Enter automáticamente
 - Teclas soportadas: Ctrl, Alt, Shift, Win + A-Z, 0-9, F1-F12, Space, Enter, Escape, Tab
+
+### Configurar voz
+
+Editar `config.json` → sección `voice`:
+
+```json
+"voice": {
+  "hotkey": "ctrl+alt+v",
+  "hotkey_text": "ctrl+alt+t",
+  "whisper_model": "medium",
+  "whisper_device": "cuda",
+  "whisper_compute_type": "float16",
+  "whisper_initial_prompt": "KAPS, Syion, Claude Code, PowerShell, git"
+}
+```
+
+- `whisper_initial_prompt` — palabras que Whisper debe reconocer (nombres propios, técnicos)
+- `whisper_model` — `tiny`, `base`, `small`, `medium`, `large-v3` (más grande = más preciso, más lento)
+- Requiere venv de `voice-commander` con faster-whisper + CUDA instalado
 
 ## Diagnóstico
 
