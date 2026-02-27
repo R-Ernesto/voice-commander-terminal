@@ -37,21 +37,18 @@ class PushToTalkHandler:
         self._result_event = threading.Event()
         self._result: dict | None = None
 
-    def _on_key_down(self, trigger_key: str, event):
+    def _on_key_down(self, trigger_key: str):
         if self._recording:
-            return
-        hk = self._hotkeys[trigger_key]
-        if not keyboard.is_pressed(hk["combo"]):
             return
         # Capture the foreground window IMMEDIATELY
         self._hwnd = user32.GetForegroundWindow()
-        self._current_mode = hk["mode"]
+        self._current_mode = self._hotkeys[trigger_key]["mode"]
         self._recording = True
         # Beep: recording started (800 Hz, 150ms) — non-blocking
         threading.Thread(target=winsound.Beep, args=(800, 150), daemon=True).start()
         self._recorder.start()
 
-    def _on_key_up(self, trigger_key: str, event):
+    def _on_key_up(self, trigger_key: str, event=None):
         if not self._recording:
             return
         # Only stop if the released key matches the mode that started recording
@@ -89,12 +86,15 @@ class PushToTalkHandler:
         self._result_event.clear()
         self._result = None
 
-        for trigger_key in self._hotkeys:
-            keyboard.on_press_key(
-                trigger_key,
-                lambda e, k=trigger_key: self._on_key_down(k, e),
-                suppress=False,
+        for trigger_key, hk in self._hotkeys.items():
+            # add_hotkey with suppress=True prevents ^V / ^T from reaching the terminal
+            keyboard.add_hotkey(
+                hk["combo"],
+                lambda k=trigger_key: self._on_key_down(k),
+                suppress=True,
+                trigger_on_release=False,
             )
+            # key-up doesn't produce characters, no need to suppress
             keyboard.on_release_key(
                 trigger_key,
                 lambda e, k=trigger_key: self._on_key_up(k, e),

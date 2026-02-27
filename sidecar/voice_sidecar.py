@@ -59,6 +59,8 @@ def main():
 
     while True:
         try:
+            # Reload config each cycle (hot-reload prompt changes without restart)
+            handler.cfg = load_config()
             result = handler.wait_for_cycle()
             mode = result["mode"]
             auto_submit = mode == "submit"

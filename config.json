@@ -30,7 +30,7 @@
     "whisper_model": "medium",
     "whisper_device": "cuda",
     "whisper_compute_type": "float16",
-    "whisper_initial_prompt": "KAPS, Syion, Claude Code, PowerShell, git",
+    "whisper_initial_prompt": "KAPS, Syion, Komoco, llavetina, getSalesOrderToPurchaseOrder, aftersales, IIS Express, stored procedure, PowerShell, git, docker, dotnet, npm, SQL Server, Visual Studio, Claude Code, KOM",
     "auto_submit": true,
     "sample_rate": 16000,
     "channels": 1
